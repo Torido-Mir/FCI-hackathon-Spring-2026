@@ -60,47 +60,21 @@ class CMHCCollector(BaseCollector):
         )
 
         if not excel_url:
-            # Fall back to trying common URL patterns
-            # CMHC typically uses patterns like /en/Documents/...
             print("Could not find rental market Excel URL, skipping")
             return metrics
 
-        df = self._download_and_parse_excel(excel_url)
+        # Table 1.1.1 contains vacancy rates
+        df = self._download_and_parse_excel(excel_url, sheet_name="Table 1.1.1")
         if df is None or df.empty:
             return metrics
 
-        # Find KCW rows
-        kcw_data = self._filter_for_kcw(df)
-        if kcw_data.empty:
+        # Find KCW row (typically "Kitchener - Cambridge - Waterloo CMA")
+        kcw_row = self._find_kcw_row(df)
+        if kcw_row is None:
             return metrics
 
-        # Extract vacancy rate values
-        # CMHC Excel structure varies, look for vacancy-related columns
-        vacancy_cols = [
-            col for col in df.columns if "vacancy" in str(col).lower()
-        ]
-
-        for _, row in kcw_data.iterrows():
-            for col in vacancy_cols:
-                try:
-                    value = row[col]
-                    if pd.notna(value):
-                        # Try to extract year from the data or column name
-                        year = self._extract_year(col, row)
-                        metrics.append(
-                            HousingMetricCreate(
-                                category=HousingCategory.VACANCY_RATE,
-                                metric_name=f"Rental Vacancy Rate - {col}",
-                                value=Decimal(str(value)),
-                                unit="percent",
-                                period_start=date(year, 1, 1),
-                                period_end=date(year, 12, 31),
-                                source="CMHC Rental Market Survey",
-                            )
-                        )
-                except (ValueError, TypeError):
-                    continue
-
+        # Extract vacancy rate values from the row
+        metrics.extend(self._extract_vacancy_rates_from_row(kcw_row))
         return metrics
 
     def _collect_housing_starts(self) -> list[HousingMetricCreate]:
@@ -200,18 +174,81 @@ class CMHCCollector(BaseCollector):
         
         return url
 
-    def _download_and_parse_excel(self, url: str) -> Optional[pd.DataFrame]:
+    def _download_and_parse_excel(self, url: str, sheet_name: int | str = 0) -> Optional[pd.DataFrame]:
         """Download Excel file and parse into DataFrame."""
         try:
             response = requests.get(url, timeout=60)
             response.raise_for_status()
 
-            # Parse Excel file
-            df = pd.read_excel(io.BytesIO(response.content), engine="openpyxl")
+            # Parse Excel file with specified sheet
+            df = pd.read_excel(io.BytesIO(response.content), sheet_name=sheet_name, engine="openpyxl")
             return df
         except Exception as e:
             print(f"Error downloading/parsing Excel: {e}")
             return None
+
+    def _find_kcw_row(self, df: pd.DataFrame) -> Optional[pd.Series]:
+        """Find the KCW CMA data row in the DataFrame."""
+        # Look for the CMA row specifically (contains "CMA" and KCW pattern)
+        for idx, row in df.iterrows():
+            first_col_value = str(row.iloc[0]).lower()
+
+            # Must contain "cma" and a KCW pattern
+            if "cma" not in first_col_value:
+                continue
+
+            if not any(pattern.lower() in first_col_value for pattern in self.KCW_PATTERNS):
+                continue
+
+            # Make sure this looks like a data row (has some convertible numeric values)
+            has_numeric = False
+            for val in row.iloc[1:]:
+                if pd.isna(val):
+                    continue
+                try:
+                    float(str(val))
+                    has_numeric = True
+                    break
+                except (ValueError, TypeError):
+                    continue
+
+            if has_numeric:
+                return row
+
+        return None
+
+    def _extract_vacancy_rates_from_row(self, row: pd.Series) -> list[HousingMetricCreate]:
+        """Extract numeric vacancy rate values from a row."""
+        metrics = []
+        current_year = date.today().year
+
+        for col_idx, value in enumerate(row):
+            # Skip non-numeric values and NaN
+            if pd.isna(value):
+                continue
+
+            try:
+                numeric_value = float(value)
+                # Vacancy rates should be reasonable percentages (0-50%)
+                if 0 <= numeric_value <= 50:
+                    # Get column name if available
+                    col_name = str(row.index[col_idx]) if hasattr(row.index, '__getitem__') else f"Column {col_idx}"
+
+                    metrics.append(
+                        HousingMetricCreate(
+                            category=HousingCategory.VACANCY_RATE,
+                            metric_name=f"Rental Vacancy Rate - {col_name}",
+                            value=Decimal(str(numeric_value)),
+                            unit="percent",
+                            period_start=date(current_year, 1, 1),
+                            period_end=date(current_year, 12, 31),
+                            source="CMHC Rental Market Survey",
+                        )
+                    )
+            except (ValueError, TypeError):
+                continue
+
+        return metrics
 
     def _filter_for_kcw(self, df: pd.DataFrame) -> pd.DataFrame:
         """Filter DataFrame for Kitchener-Cambridge-Waterloo rows."""
