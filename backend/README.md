@@ -18,7 +18,7 @@ Python + FastAPI backend responsible for scheduled data collection, transformati
  
 ## Setup
  
-### 1. Create virtual environment
+### 1. Create and activate virtual environment
 ```bash
 python -m venv venv
 source venv/bin/activate      # Windows: venv\Scripts\activate
@@ -29,18 +29,16 @@ source venv/bin/activate      # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
  
-### 3. Configure environment variables
+### 3. Set up environment configuration
 ```bash
 cp .env.example .env
 ```
  
-Fill in `.env`:
-```
-DATABASE_URL=postgresql://user:password@localhost:5432/scorecard
-FETCH_INTERVAL_MINUTES=60
-```
+The `.env` file contains:
+- `DATABASE_URL`: PostgreSQL connection string (defaults to local postgres)
+- `FETCH_INTERVAL_MINUTES`: Scheduler interval for background data collection (default: 60)
  
-If using Supabase, your `DATABASE_URL` will look like:
+If using Supabase:
 ```
 DATABASE_URL=postgresql://postgres:<password>@db.<project>.supabase.co:5432/postgres
 ```
@@ -49,13 +47,38 @@ DATABASE_URL=postgresql://postgres:<password>@db.<project>.supabase.co:5432/post
 ```bash
 python init_db.py
 ```
+
+This creates all tables and seeds 30 days of historical metric data for testing and trend visualization.
  
-### 5. Run the server
+### 5. Start the development server
 ```bash
-uvicorn main:app --reload
+fastapi dev main.py
 ```
  
-API docs available at: http://localhost:8000/docs
+The server will start at `http://127.0.0.1:8000` with auto-reload enabled.
+
+API documentation (Swagger UI) is available at: `http://127.0.0.1:8000/docs`
+
+## Testing the Backend
+
+Once the server is running, you can verify all endpoints:
+
+```bash
+# Health check
+curl http://127.0.0.1:8000/health
+
+# Fetch latest metrics
+curl http://127.0.0.1:8000/metrics
+
+# Fetch historical data for a metric
+curl "http://127.0.0.1:8000/metrics/history?metric=Labour%20force%20participation%20rate"
+
+# Trigger a manual data fetch
+curl -X POST http://127.0.0.1:8000/fetchData
+
+# View interactive API docs
+open http://127.0.0.1:8000/docs
+```
  
 ## Project Structure
  
