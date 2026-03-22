@@ -29,6 +29,8 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL not found in .env file")
 
+FETCH_INTERVAL_MINUTES = int(os.getenv("FETCH_INTERVAL_MINUTES", "60"))
+
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(bind=engine)
 
@@ -48,7 +50,7 @@ def get_db():
 def fetch_data():
     """
     Orchestrate data collection from all sources.
-    Called by /fetchData endpoint and scheduled by APScheduler.
+    Called by /fetchData endpoint.
     """
     logger.info("Starting data fetch pipeline...")
 
