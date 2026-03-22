@@ -177,12 +177,15 @@ class CMHCCollector(BaseCollector):
     ) -> Optional[str]:
         """Scrape the CMHC page to find Excel download URL."""
         try:
-            response = requests.get(page_url, timeout=30)
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            }
+            response = requests.get(page_url, timeout=30, headers=headers)
             response.raise_for_status()
 
             soup = BeautifulSoup(response.text, "html.parser")
 
-            # Look for Excel download links
+            # Look for Excel download links in href attributes
             for link in soup.find_all("a", href=True):
                 href = link["href"]
                 if ".xlsx" in href.lower() or ".xls" in href.lower():
@@ -190,6 +193,16 @@ class CMHCCollector(BaseCollector):
                     if href.startswith("/"):
                         href = f"https://www.cmhc-schl.gc.ca{href}"
                     return href
+
+            # Also check for Excel URLs in value attributes (hidden inputs/data)
+            for element in soup.find_all(True):
+                for attr_name, attr_value in element.attrs.items():
+                    if isinstance(attr_value, str):
+                        if ".xlsx" in attr_value.lower() or ".xls" in attr_value.lower():
+                            # Make absolute URL if needed
+                            if attr_value.startswith("/"):
+                                attr_value = f"https://www.cmhc-schl.gc.ca{attr_value}"
+                            return attr_value
 
             # Also check for download buttons/forms
             for button in soup.find_all(["button", "input"], {"type": "submit"}):
