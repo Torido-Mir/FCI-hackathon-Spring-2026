@@ -172,37 +172,33 @@ class CMHCCollector(BaseCollector):
 
         return metrics
 
-    def _find_excel_download_url(
-        self, page_url: str, data_type: str
-    ) -> Optional[str]:
-        """Scrape the CMHC page to find Excel download URL."""
-        try:
-            response = requests.get(page_url, timeout=30)
-            response.raise_for_status()
-
-            soup = BeautifulSoup(response.text, "html.parser")
-
-            # Look for Excel download links
-            for link in soup.find_all("a", href=True):
-                href = link["href"]
-                if ".xlsx" in href.lower() or ".xls" in href.lower():
-                    # Make absolute URL if needed
-                    if href.startswith("/"):
-                        href = f"https://www.cmhc-schl.gc.ca{href}"
-                    return href
-
-            # Also check for download buttons/forms
-            for button in soup.find_all(["button", "input"], {"type": "submit"}):
-                # Check if it's related to downloads
-                text = button.get("value", "") or button.get_text()
-                if "download" in text.lower():
-                    # This might need form submission, return None for now
-                    pass
-
+    def _find_excel_download_url(self, page_url: str, data_type: str) -> Optional[str]:
+        from datetime import datetime
+        
+        year = datetime.now().year  # assumes annual update
+        
+        CITY_SLUGS = {
+            "rental": "kitchener-cambridge-waterloo",
+            # add other cities if needed
+        }
+        
+        slug = CITY_SLUGS.get(data_type)
+        if not slug:
             return None
-        except Exception as e:
-            print(f"Error finding Excel URL: {e}")
-            return None
+    
+        url = (
+            f"https://assets.cmhc-schl.gc.ca/sites/cmhc/professional/"
+            f"housing-markets-data-and-research/housing-data-tables/rental-market/"
+            f"rental-market-report-data-tables/{year}/"
+            f"rmr-{slug}-{year}-en.xlsx"
+        )
+        
+        # Verify it exists, fall back to previous year if not yet published
+        resp = requests.head(url, timeout=10)
+        if resp.status_code != 200:
+            url = url.replace(str(year), str(year - 1))
+        
+        return url
 
     def _download_and_parse_excel(self, url: str) -> Optional[pd.DataFrame]:
         """Download Excel file and parse into DataFrame."""
