@@ -1,23 +1,9 @@
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-from collectors import CMHCCollector, StatsCanCollector
+from collectors import CMHCCollector
 from config import settings
 from database import SessionLocal
-
-
-def run_statscan_collection():
-    """Job to run StatsCan data collection."""
-    db = SessionLocal()
-    try:
-        collector = StatsCanCollector(db)
-        records, error = collector.run()
-        if error:
-            print(f"StatsCan collection error: {error}")
-        else:
-            print(f"StatsCan collection complete: {records} records added")
-    finally:
-        db.close()
 
 
 def run_cmhc_collection():
@@ -37,16 +23,6 @@ def run_cmhc_collection():
 def create_scheduler() -> BackgroundScheduler:
     """Create and configure the scheduler."""
     scheduler = BackgroundScheduler()
-
-    # StatsCan building permits - run on 15th of each month at 9 AM
-    # (Data is typically released ~45 days after month end)
-    scheduler.add_job(
-        run_statscan_collection,
-        CronTrigger(day=15, hour=9, minute=0),
-        id="statscan_monthly",
-        name="StatsCan Building Permits Collection",
-        replace_existing=True,
-    )
 
     # CMHC housing starts - run on 15th of each month at 10 AM
     scheduler.add_job(

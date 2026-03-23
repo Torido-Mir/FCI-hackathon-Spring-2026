@@ -3,10 +3,10 @@ from typing import Optional
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import desc, func
+from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
-from collectors import CMHCCollector, StatsCanCollector
+from collectors import CMHCCollector
 from config import DataSource, HousingCategory, settings
 from database import CollectionLogDB, HousingMetricDB, get_db, init_db
 from models import FetchResponse, HealthResponse, HousingMetric, MetricsResponse
@@ -60,17 +60,15 @@ async def root():
 @app.get("/health", response_model=HealthResponse)
 async def health_check(db: Session = Depends(get_db)):
     """Health check with last collection times."""
-    # Get last collection time for each source
     last_collections = {}
 
-    for source in [DataSource.STATSCAN, DataSource.CMHC]:
-        result = (
-            db.query(CollectionLogDB)
-            .filter(CollectionLogDB.source == source, CollectionLogDB.status == "success")
-            .order_by(desc(CollectionLogDB.collected_at))
-            .first()
-        )
-        last_collections[source] = result.collected_at if result else None
+    result = (
+        db.query(CollectionLogDB)
+        .filter(CollectionLogDB.source == DataSource.CMHC, CollectionLogDB.status == "success")
+        .order_by(desc(CollectionLogDB.collected_at))
+        .first()
+    )
+    last_collections[DataSource.CMHC] = result.collected_at if result else None
 
     return HealthResponse(status="healthy", last_collections=last_collections)
 
@@ -79,7 +77,6 @@ async def health_check(db: Session = Depends(get_db)):
 async def get_all_metrics(db: Session = Depends(get_db)):
     """Get all housing metrics grouped by category."""
     categories = [
-        HousingCategory.DWELLINGS_BUILT,
         HousingCategory.VACANCY_RATE,
         HousingCategory.HOUSING_STARTS,
         HousingCategory.HOUSING_COMPLETIONS,
@@ -107,7 +104,6 @@ async def get_all_metrics(db: Session = Depends(get_db)):
 async def get_metrics_by_category(category: str, db: Session = Depends(get_db)):
     """Get metrics for a specific category."""
     valid_categories = [
-        HousingCategory.DWELLINGS_BUILT,
         HousingCategory.VACANCY_RATE,
         HousingCategory.HOUSING_STARTS,
         HousingCategory.HOUSING_COMPLETIONS,
@@ -132,54 +128,13 @@ async def get_metrics_by_category(category: str, db: Session = Depends(get_db)):
     )
 
 
-@app.post("/fetch-data", response_model=list[FetchResponse])
+@app.post("/fetch-data", response_model=FetchResponse)
 async def fetch_all_data(db: Session = Depends(get_db)):
-    """Trigger data collection from all sources."""
-    results = []
-
-    # StatsCan
-    statscan_collector = StatsCanCollector(db)
-    records, error = statscan_collector.run()
-    results.append(
-        FetchResponse(
-            source=DataSource.STATSCAN,
-            status="error" if error else "success",
-            records_added=records,
-            message=error,
-        )
-    )
-
-    # CMHC
-    cmhc_collector = CMHCCollector(db)
-    records, error = cmhc_collector.run()
-    results.append(
-        FetchResponse(
-            source=DataSource.CMHC,
-            status="error" if error else "success",
-            records_added=records,
-            message=error,
-        )
-    )
-
-    return results
-
-
-@app.post("/fetch-data/{source}", response_model=FetchResponse)
-async def fetch_data_by_source(source: str, db: Session = Depends(get_db)):
-    """Trigger data collection from a specific source."""
-    if source == DataSource.STATSCAN:
-        collector = StatsCanCollector(db)
-    elif source == DataSource.CMHC:
-        collector = CMHCCollector(db)
-    else:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid source. Valid options: {DataSource.STATSCAN}, {DataSource.CMHC}",
-        )
-
+    """Trigger CMHC data collection."""
+    collector = CMHCCollector(db)
     records, error = collector.run()
     return FetchResponse(
-        source=source,
+        source=DataSource.CMHC,
         status="error" if error else "success",
         records_added=records,
         message=error,
