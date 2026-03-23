@@ -69,10 +69,15 @@ class StatsCanCollector(BaseCollector):
         return metrics
 
     def _fetch_data_by_coordinate(
-        self, coordinate: str, periods: int = 12
+        self, coordinate: str, periods: int = 12, debug: bool = False
     ) -> list[dict]:
         """Fetch data from StatsCan using coordinate-based query."""
         url = f"{self.base_url}/getDataFromCubePidCoordAndLatestNPeriods"
+
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        }
 
         payload = [
             {
@@ -82,7 +87,23 @@ class StatsCanCollector(BaseCollector):
             }
         ]
 
-        response = requests.post(url, json=payload, timeout=30)
+        if debug:
+            import json
+            print("=== DEBUG REQUEST ===")
+            print(f"URL:     {url}")
+            print(f"Headers: {headers}")
+            print(f"Body:    {json.dumps(payload, indent=2)}")
+            print("====================")
+
+        response = requests.post(url, json=payload, headers=headers, timeout=30)
+
+        if debug:
+            print(f"=== DEBUG RESPONSE ===")
+            print(f"Status:  {response.status_code}")
+            print(f"Headers: {dict(response.headers)}")
+            print(f"Body:    {response.text[:2000]}")
+            print("======================")
+
         response.raise_for_status()
 
         data = response.json()
@@ -98,6 +119,8 @@ class StatsCanCollector(BaseCollector):
 
         return result.get("object", {}).get("vectorDataPoint", [])
 
+
+    # currently unused
     def _fetch_cube_metadata(self) -> dict:
         """Fetch metadata about the table structure."""
         url = f"{self.base_url}/getCubeMetadata"

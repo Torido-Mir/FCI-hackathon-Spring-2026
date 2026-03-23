@@ -77,74 +77,110 @@ class CMHCCollector(BaseCollector):
         metrics.extend(self._extract_vacancy_rates_from_row(kcw_row))
         return metrics
 
-    def _collect_housing_starts(self) -> list[HousingMetricCreate]:
-        """Collect housing starts and completions data from CMHC."""
-        metrics = []
+    # Column indices in Table A4_1 (0 = CMA name, then data columns)
+    STARTS_COMPLETIONS_COLS = {
+        "Starts - Singles":          1,
+        "Starts - Semis":            2,
+        "Starts - Row":              3,
+        "Starts - Apt. and Other":   4,
+        "Starts - Total":            5,
+        "Completions - Singles":     6,
+        "Completions - Semis":       7,
+        "Completions - Row":         8,
+        "Completions - Apt. and Other": 9,
+        "Completions - Total":       10,
+    }
 
-        excel_url = self._find_excel_download_url(
-            settings.cmhc_housing_starts_url, "starts"
+    MONTH_NAMES = [
+        "january", "february", "march", "april", "may", "june",
+        "july", "august", "september", "october", "november", "december",
+    ]
+
+    # Earliest year to fetch (files go back to roughly 2015)
+    STARTS_HISTORY_START_YEAR = 2020
+
+    def _build_monthly_starts_url(self, year: int, month: int) -> str:
+        """Build the direct CMHC Excel URL for a given year/month."""
+        month_name = self.MONTH_NAMES[month - 1]
+        yr2 = str(year)[-2:]
+        month2 = f"{month:02d}"
+        return (
+            "https://assets.cmhc-schl.gc.ca/sites/cmhc/professional/"
+            "housing-markets-data-and-research/housing-data-tables/"
+            f"housing-market-data/housing-information-monthly/"
+            f"{year}/{month_name}/"
+            f"provincial-starts-completions-dwelling-type-{month2}-{yr2}-en.xlsx"
         )
 
-        if not excel_url:
-            print("Could not find housing starts Excel URL, skipping")
-            return metrics
+    def _collect_housing_starts(self) -> list[HousingMetricCreate]:
+        """Collect monthly housing starts and completions for KCW from CMHC Excel files.
 
-        df = self._download_and_parse_excel(excel_url)
-        if df is None or df.empty:
-            return metrics
+        Source: Table A4-1 – Starts and Completions by Dwelling Type (Census Metropolitan Areas).
+        The Kitchener-Cambridge-Waterloo CMA corresponds to the Region of Waterloo
+        (City of Kitchener, City of Cambridge, City of Waterloo, and surrounding townships).
+        """
+        import calendar
 
-        kcw_data = self._filter_for_kcw(df)
-        if kcw_data.empty:
-            return metrics
+        metrics = []
+        today = date.today()
 
-        # Look for starts and completions columns
-        starts_cols = [col for col in df.columns if "start" in str(col).lower()]
-        completions_cols = [
-            col for col in df.columns if "complet" in str(col).lower()
-        ]
-
-        for _, row in kcw_data.iterrows():
-            # Housing starts
-            for col in starts_cols:
-                try:
-                    value = row[col]
-                    if pd.notna(value):
-                        year = self._extract_year(col, row)
-                        metrics.append(
-                            HousingMetricCreate(
-                                category=HousingCategory.HOUSING_STARTS,
-                                metric_name=f"Housing Starts - {col}",
-                                value=Decimal(str(int(value))),
-                                unit="units",
-                                period_start=date(year, 1, 1),
-                                period_end=date(year, 12, 31),
-                                source="CMHC Starts and Completions Survey",
-                            )
-                        )
-                except (ValueError, TypeError):
+        for year in range(self.STARTS_HISTORY_START_YEAR, today.year + 1):
+            max_month = today.month if year == today.year else 12
+            for month in range(1, max_month + 1):
+                url = self._build_monthly_starts_url(year, month)
+                df = self._download_and_parse_excel(url, sheet_name="Table A4_1")
+                if df is None or df.empty:
                     continue
 
-            # Housing completions
-            for col in completions_cols:
-                try:
-                    value = row[col]
-                    if pd.notna(value):
-                        year = self._extract_year(col, row)
-                        metrics.append(
-                            HousingMetricCreate(
-                                category=HousingCategory.HOUSING_COMPLETIONS,
-                                metric_name=f"Housing Completions - {col}",
-                                value=Decimal(str(int(value))),
-                                unit="units",
-                                period_start=date(year, 1, 1),
-                                period_end=date(year, 12, 31),
-                                source="CMHC Starts and Completions Survey",
-                            )
-                        )
-                except (ValueError, TypeError):
+                kcw_row = self._find_kcw_row_in_a4(df)
+                if kcw_row is None:
+                    print(f"KCW row not found in {year}-{month:02d}")
                     continue
+
+                period_start = date(year, month, 1)
+                period_end = date(year, month, calendar.monthrange(year, month)[1])
+
+                for col_name, col_idx in self.STARTS_COMPLETIONS_COLS.items():
+                    try:
+                        raw = kcw_row.iloc[col_idx]
+                        # CMHC uses "-" for zero / suppressed values
+                        if pd.isna(raw) or str(raw).strip() == "-":
+                            value = Decimal("0")
+                        else:
+                            value = Decimal(str(int(float(str(raw)))))
+                    except (ValueError, TypeError):
+                        continue
+
+                    category = (
+                        HousingCategory.HOUSING_STARTS
+                        if col_name.startswith("Starts")
+                        else HousingCategory.HOUSING_COMPLETIONS
+                    )
+                    metrics.append(
+                        HousingMetricCreate(
+                            category=category,
+                            metric_name=f"Housing {col_name} - KCW CMA",
+                            value=value,
+                            unit="units",
+                            period_start=period_start,
+                            period_end=period_end,
+                            source="CMHC Housing Information Monthly",
+                        )
+                    )
 
         return metrics
+
+    def _find_kcw_row_in_a4(self, df: pd.DataFrame) -> Optional[pd.Series]:
+        """Find the Kitchener-Cambridge-Waterloo row in Table A4_1.
+
+        The table has 6 header rows (rows 0-5); data rows start at index 6.
+        Column 0 holds the CMA name.
+        """
+        for idx in range(6, len(df)):
+            cell = str(df.iloc[idx, 0]).strip()
+            if any(p.lower() in cell.lower() for p in self.KCW_PATTERNS):
+                return df.iloc[idx]
+        return None
 
     def _find_excel_download_url(self, page_url: str, data_type: str) -> Optional[str]:
         from datetime import datetime
@@ -178,6 +214,8 @@ class CMHCCollector(BaseCollector):
         """Download Excel file and parse into DataFrame."""
         try:
             response = requests.get(url, timeout=60)
+            if response.status_code == 404:
+                return None
             response.raise_for_status()
 
             # Parse Excel file with specified sheet
@@ -222,6 +260,15 @@ class CMHCCollector(BaseCollector):
         metrics = []
         current_year = date.today().year
 
+        # Define the manual mapping based on your column ranges
+        column_mapping = {
+            range(1, 6): "Studio",
+            range(6, 11): "1 Bedroom",
+            range(11, 16): "2 Bedroom",
+            range(16, 21): "3 Bedroom +",
+            range(21, 26): "Total"
+        }
+
         for col_idx, value in enumerate(row):
             # Skip non-numeric values and NaN
             if pd.isna(value):
@@ -231,8 +278,17 @@ class CMHCCollector(BaseCollector):
                 numeric_value = float(value)
                 # Vacancy rates should be reasonable percentages (0-50%)
                 if 0 <= numeric_value <= 50:
-                    # Get column name if available
-                    col_name = str(row.index[col_idx]) if hasattr(row.index, '__getitem__') else f"Column {col_idx}"
+                    
+                    # --- REWRITTEN SECTION ---
+                    col_name = "Unknown"
+                    for r, label in column_mapping.items():
+                        if col_idx in r:
+                            col_name = label
+                            break
+                    
+                    # If the column isn't in our 1-25 range, you might want to skip it
+                    if col_name == "Unknown":
+                        continue
 
                     metrics.append(
                         HousingMetricCreate(

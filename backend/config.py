@@ -1,10 +1,12 @@
 import os
+from dotenv import load_dotenv
 from pydantic_settings import BaseSettings
 
+load_dotenv()
 
 class Settings(BaseSettings):
     # Database
-    database_url: str = "postgresql://postgres:postgres@localhost:5432/millionready"
+    database_url: str = os.getenv("DATABASE_URL", "sqlite:///./housing_metrics.db")
 
     # StatsCan API
     statscan_base_url: str = "https://www150.statcan.gc.ca/t1/wds/rest"
