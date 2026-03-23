@@ -1,6 +1,6 @@
-# Backend -- MillionReady
+# Backend — MillionReady
 
-Python + FastAPI backend responsible for scheduled data collection, transformation, and serving housing metrics for the Region of Waterloo scorecard.
+Python + FastAPI backend responsible for scheduled CMHC data collection, transformation, and serving housing metrics (rental vacancy rates, housing starts, completions) for the Kitchener-Cambridge-Waterloo CMA.
 
 ## Tech Stack
 
@@ -8,9 +8,9 @@ Python + FastAPI backend responsible for scheduled data collection, transformati
 |---|---|
 | FastAPI | REST API framework |
 | APScheduler | Cron-style scheduled data fetching |
-| requests | HTTP calls to external APIs (StatsCan) |
-| BeautifulSoup4 | HTML scraping for CMHC download links |
-| pandas + openpyxl | Parsing CMHC Excel files |
+| requests | HTTP calls for CMHC data download |
+| BeautifulSoup4 | HTML scraping for CMHC Excel file links |
+| pandas + openpyxl | CMHC Excel file parsing and transformation |
 | SQLAlchemy | ORM for PostgreSQL |
 | psycopg2-binary | PostgreSQL driver |
 | uvicorn | ASGI server |
@@ -59,16 +59,17 @@ API docs available at: http://localhost:8000/docs
 ```
 backend/
 ├── main.py              # FastAPI app, route definitions, lifecycle events
-├── config.py            # Settings and constants (StatsCan/CMHC URLs, CMA codes)
+├── config.py            # Settings and constants (CMHC URLs, CMA codes)
 ├── database.py          # SQLAlchemy models and session management
 ├── models.py            # Pydantic schemas for API requests/responses
 ├── scheduler.py         # APScheduler configuration and jobs
 ├── requirements.txt
 ├── .env.example
+├── Dockerfile           # Docker container configuration
+├── .dockerignore
 └── collectors/
     ├── __init__.py
     ├── base.py          # Base collector class with logging
-    ├── statscan.py      # Statistics Canada WDS API collector
     └── cmhc.py          # CMHC Excel file downloader/parser
 ```
 
@@ -81,20 +82,16 @@ API information and available endpoints.
 Health check with last successful collection times for each data source.
 
 ### `GET /metrics`
-Returns all housing metrics grouped by category:
-- `dwellings_built` - Building permits (dwelling units created)
-- `vacancy_rate` - Rental vacancy rates
-- `housing_starts` - New housing construction starts
-- `housing_completions` - Completed housing units
+Returns all CMHC housing metrics grouped by category:
+- `vacancy_rate` - Rental vacancy rates by bedroom type
+- `housing_starts` - New housing construction starts by dwelling type
+- `housing_completions` - Completed housing units by dwelling type
 
 ### `GET /metrics/{category}`
-Returns metrics for a specific category.
+Returns metrics for a specific category (`vacancy_rate`, `housing_starts`, or `housing_completions`).
 
 ### `POST /fetch-data`
-Triggers data collection from all sources (StatsCan + CMHC).
-
-### `POST /fetch-data/{source}`
-Triggers data collection from a specific source (`statscan` or `cmhc`).
+Triggers a complete CMHC data collection run (vacancy rates, housing starts, and completions).
 
 ### `GET /scheduled-jobs`
 Lists scheduled data collection jobs and their next run times.
@@ -106,33 +103,27 @@ Returns recent collection log entries (success/error status, records added).
 
 ### Housing Metrics (Kitchener-Cambridge-Waterloo CMA)
 
-| Metric | Source | Method | Frequency |
-|---|---|---|---|
-| Dwelling Units Created | StatsCan Table 34-10-0292-01 | REST API | Monthly |
-| Rental Vacancy Rate | CMHC Rental Market Survey | Excel Download | Annual |
-| Housing Starts | CMHC Starts & Completions | Excel Download | Monthly |
-| Housing Completions | CMHC Starts & Completions | Excel Download | Monthly |
+All metrics are sourced from CMHC (Canada Mortgage and Housing Corporation):
 
-### StatsCan API Details
+| Metric | Method | Frequency |
+|---|---|---|
+| Rental Vacancy Rate | CMHC Rental Market Survey Excel Download | Annual |
+| Housing Starts | CMHC Housing Information Monthly Excel Download | Monthly |
+| Housing Completions | CMHC Housing Information Monthly Excel Download | Monthly |
 
-- Base URL: `https://www150.statcan.gc.ca/t1/wds/rest/`
-- No authentication required
-- KCW CMA coordinate: `1.38`
-- Table: 34-10-0292-01 (Building permits by type of structure and type of work)
+### CMHC Data Collection
 
-### CMHC Data
-
-CMHC does not provide a public REST API. Data is collected by:
-1. Scraping the CMHC data tables page for Excel download links
-2. Downloading and parsing the Excel files with pandas
+CMHC does not provide a public REST API. Data is collected via:
+1. Scraping the CMHC data tables page to find Excel download links
+2. Downloading and parsing Excel files with pandas and openpyxl
 3. Filtering for Kitchener-Cambridge-Waterloo rows
+4. Storing results in PostgreSQL with deduplication
 
 ## Scheduler
 
-APScheduler runs data collection automatically:
-- **StatsCan**: Monthly on the 15th at 9:00 AM
-- **CMHC Housing Starts**: Monthly on the 15th at 10:00 AM
-- **CMHC Vacancy Rate**: Annually on December 15th at 10:00 AM
+APScheduler runs CMHC data collection automatically:
+- **CMHC Housing Starts & Completions**: Monthly on the 15th at 10:00 AM
+- **CMHC Rental Vacancy Rate**: Annually on December 15th at 10:00 AM
 
 Set `ENABLE_SCHEDULER=false` in `.env` to disable automatic collection.
 

@@ -14,19 +14,19 @@ A hackathon project for the FCI Winter 2026 Hackathon. This tool automates the d
 ## Architecture Overview
  
 ```
-Data Sources (StatCan, CMHC, City of Waterloo, GRT, ...)
+Data Sources (CMHC housing data)
         ↓
 APScheduler (cron-style scheduled jobs)
         ↓
-FastAPI /fetchData endpoint
-        ↓  (requests, BeautifulSoup, pdfplumber)
+FastAPI /fetch-data endpoint
+        ↓  (requests, BeautifulSoup, openpyxl, pandas)
 Pandas (clean + transform)
         ↓
-PostgreSQL (store raw + scored metrics)
+PostgreSQL (store housing metrics)
         ↓
 FastAPI /metrics endpoint
         ↓
-React + Vite Dashboard (scores, trends, refresh/refetch buttons)
+React + Vite Dashboard (housing metrics, vacancy rates, trends)
 ```
  
 ## Quickstart
@@ -68,6 +68,6 @@ npm run dev
  
 Built at the FCI Winter 2026 Hackathon in collaboration with Brave Career and UW CS Club.
  
-## Current Focus
+## Current Implementation
  
-Employment sector — pulling labour force and job market data from Statistics Canada and City of Waterloo sources. Additional sectors (housing, transportation, healthcare, placemaking) to be added incrementally.
+**Housing Sector** — Collecting and visualizing housing metrics from CMHC data (rental vacancy rates, housing starts, and completions) for the Kitchener-Cambridge-Waterloo CMA. Additional sectors (transportation, healthcare, employment, placemaking) planned for future iterations.
