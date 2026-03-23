@@ -6,10 +6,12 @@ from typing import Optional
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from collectors.base import BaseCollector
 from config import DataSource, HousingCategory, settings
+from database import HousingMetricDB
 from models import HousingMetricCreate
 
 
@@ -112,8 +114,20 @@ class CMHCCollector(BaseCollector):
             f"provincial-starts-completions-dwelling-type-{month2}-{yr2}-en.xlsx"
         )
 
+    def _get_latest_starts_period(self) -> Optional[date]:
+        """Return the most recent period_start stored for housing starts/completions."""
+        result = (
+            self.db.query(func.max(HousingMetricDB.period_start))
+            .filter(HousingMetricDB.source == "CMHC Housing Information Monthly")
+            .scalar()
+        )
+        return result  # None if no rows exist yet
+
     def _collect_housing_starts(self) -> list[HousingMetricCreate]:
         """Collect monthly housing starts and completions for KCW from CMHC Excel files.
+
+        Only fetches months not yet stored in the DB. Starts from the month after the
+        latest stored period, or STARTS_HISTORY_START_YEAR if the DB is empty.
 
         Source: Table A4-1 – Starts and Completions by Dwelling Type (Census Metropolitan Areas).
         The Kitchener-Cambridge-Waterloo CMA corresponds to the Region of Waterloo
@@ -124,9 +138,23 @@ class CMHCCollector(BaseCollector):
         metrics = []
         today = date.today()
 
-        for year in range(self.STARTS_HISTORY_START_YEAR, today.year + 1):
+        latest = self._get_latest_starts_period()
+        if latest is None:
+            start_year = self.STARTS_HISTORY_START_YEAR
+            start_month = 1
+        else:
+            # Advance one month past the latest stored period
+            if latest.month == 12:
+                start_year = latest.year + 1
+                start_month = 1
+            else:
+                start_year = latest.year
+                start_month = latest.month + 1
+
+        for year in range(start_year, today.year + 1):
+            first_month = start_month if year == start_year else 1
             max_month = today.month if year == today.year else 12
-            for month in range(1, max_month + 1):
+            for month in range(first_month, max_month + 1):
                 url = self._build_monthly_starts_url(year, month)
                 df = self._download_and_parse_excel(url, sheet_name="Table A4_1")
                 if df is None or df.empty:
