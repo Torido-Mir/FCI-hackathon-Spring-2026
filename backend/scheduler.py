@@ -1,9 +1,13 @@
+import logging
+
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from collectors import CMHCCollector
 from config import settings
 from database import SessionLocal
+
+logger = logging.getLogger(__name__)
 
 
 def run_cmhc_collection():
@@ -13,9 +17,9 @@ def run_cmhc_collection():
         collector = CMHCCollector(db)
         records, error = collector.run()
         if error:
-            print(f"CMHC collection error: {error}")
+            logger.error(f"CMHC collection error: {error}")
         else:
-            print(f"CMHC collection complete: {records} records added")
+            logger.info(f"CMHC collection complete: {records} records added")
     finally:
         db.close()
 
@@ -55,7 +59,7 @@ def start_scheduler():
     if settings.enable_scheduler and scheduler is None:
         scheduler = create_scheduler()
         scheduler.start()
-        print("Scheduler started")
+        logger.info("Scheduler started")
 
 
 def stop_scheduler():
@@ -64,7 +68,7 @@ def stop_scheduler():
     if scheduler is not None:
         scheduler.shutdown()
         scheduler = None
-        print("Scheduler stopped")
+        logger.info("Scheduler stopped")
 
 
 def get_scheduled_jobs() -> list[dict]:

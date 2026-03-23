@@ -1,4 +1,5 @@
 import io
+import logging
 from datetime import date
 from decimal import Decimal
 from typing import Optional
@@ -13,6 +14,8 @@ from collectors.base import BaseCollector
 from config import DataSource, HousingCategory, settings
 from database import HousingMetricDB
 from models import HousingMetricCreate
+
+logger = logging.getLogger(__name__)
 
 
 class CMHCCollector(BaseCollector):
@@ -41,14 +44,14 @@ class CMHCCollector(BaseCollector):
             vacancy_metrics = self._collect_vacancy_rates()
             metrics.extend(vacancy_metrics)
         except Exception as e:
-            print(f"Error collecting vacancy rates: {e}")
+            logger.error(f"Error collecting vacancy rates: {e}")
 
         # Try to collect housing starts/completions
         try:
             starts_metrics = self._collect_housing_starts()
             metrics.extend(starts_metrics)
         except Exception as e:
-            print(f"Error collecting housing starts: {e}")
+            logger.error(f"Error collecting housing starts: {e}")
 
         return metrics
 
@@ -62,7 +65,7 @@ class CMHCCollector(BaseCollector):
         )
 
         if not excel_url:
-            print("Could not find rental market Excel URL, skipping")
+            logger.warning("Could not find rental market Excel URL, skipping")
             return metrics
 
         # Table 1.1.1 contains vacancy rates
@@ -98,8 +101,7 @@ class CMHCCollector(BaseCollector):
         "july", "august", "september", "october", "november", "december",
     ]
 
-    # Earliest year to fetch (files go back to roughly 2015)
-    STARTS_HISTORY_START_YEAR = 2020
+    STARTS_HISTORY_START_YEAR = 2024
 
     def _build_monthly_starts_url(self, year: int, month: int) -> str:
         """Build the direct CMHC Excel URL for a given year/month."""
@@ -162,7 +164,7 @@ class CMHCCollector(BaseCollector):
 
                 kcw_row = self._find_kcw_row_in_a4(df)
                 if kcw_row is None:
-                    print(f"KCW row not found in {year}-{month:02d}")
+                    logger.warning(f"KCW row not found in {year}-{month:02d}")
                     continue
 
                 period_start = date(year, month, 1)
@@ -250,7 +252,7 @@ class CMHCCollector(BaseCollector):
             df = pd.read_excel(io.BytesIO(response.content), sheet_name=sheet_name, engine="openpyxl")
             return df
         except Exception as e:
-            print(f"Error downloading/parsing Excel: {e}")
+            logger.error(f"Error downloading/parsing Excel: {e}")
             return None
 
     def _find_kcw_row(self, df: pd.DataFrame) -> Optional[pd.Series]:
